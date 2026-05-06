@@ -59,7 +59,7 @@
   <div class="app">
     <aside>
       <h1>Namibia City Itinerary Map</h1>
-      <p class="hint">Add, move, and remove cities. Then arrange the itinerary list below. The route line starts in Windhoek, follows your ordered list, and returns to Windhoek. You can also enter dates for each city.</p>
+      <p class="hint">Add, move, and remove cities. Then arrange the itinerary list below. The route line starts in Windhoek, follows your ordered list, and returns to Windhoek. You can also enter dates and edit the distance labels between stops.</p>
 
       <div class="legend">
         <div class="legend-row"><span class="swatch city-swatch"></span> City marker: drag to move</div>
@@ -77,6 +77,11 @@
       <h2>Edit itinerary dates</h2>
       <div id="cityDateList" class="small-list"></div>
       <p class="hint">Dates are shown in itinerary order: Windhoek, your ordered stops, then Windhoek return. Cities not yet in the itinerary are listed afterward.</p>
+
+      <h2>Edit distance labels</h2>
+      <div id="distanceList" class="small-list"></div>
+      <button id="autoDistanceBtn" class="secondary">Reset blank distance labels to auto-estimate</button>
+      <p class="hint">Enter real driving distances or times here, such as “360 km / 4.5 hrs”. Blank labels will use the rough visual estimate from the map.</p>
 
       <h2>Remove a city</h2>
       <label>City to delete <select id="deleteCitySelect"></select></label>
@@ -103,7 +108,7 @@
     </aside>
 
     <main>
-      <div class="toolbar">Drag blue city dots to adjust the map. Use ↑ and ↓ in the itinerary list to redraw the route order.</div>
+      <div class="toolbar">Drag blue city dots to adjust the map. Use ↑ and ↓ in the itinerary list to redraw the route order. Edit distance labels in the left panel.</div>
       <svg id="map" viewBox="0 0 1000 800" aria-label="Editable Namibia itinerary map">
         <path class="country" d="M250,85 L500,80 L515,350 L455,405 L370,390 L330,520 L250,500 L220,360 L235,240 Z" />
         <text class="country-label" x="295" y="250">NAMIBIA</text>
@@ -116,7 +121,8 @@
   </div>
 
   <script>
-    const STORAGE_KEY = 'namibiaCityRouteMap.v1';
+    const STORAGE_KEY = 'namibiaCityRouteMap.v2';
+    const OLD_STORAGE_KEY = 'namibiaCityRouteMap.v1';
     const WINDHOEK_NAME = 'Windhoek';
 
     const svg = document.getElementById('map');
@@ -129,6 +135,8 @@
     const cityYLabel = document.getElementById('cityYLabel');
     const addCityBtn = document.getElementById('addCityBtn');
     const cityDateList = document.getElementById('cityDateList');
+    const distanceList = document.getElementById('distanceList');
+    const autoDistanceBtn = document.getElementById('autoDistanceBtn');
     const deleteCitySelect = document.getElementById('deleteCitySelect');
     const deleteCityBtn = document.getElementById('deleteCityBtn');
     const citySelect = document.getElementById('citySelect');
@@ -151,6 +159,7 @@
       { id: crypto.randomUUID(), name: 'Fish River Canyon', x: 390, y: 520, date: '' }
     ];
     let routeCityIds = [];
+    let distanceLabels = {};
 
     function makeSvg(tag, attrs={}) {
       const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -180,8 +189,29 @@
       const middle = routeCityIds.map(cityById).filter(Boolean).filter(c => c.id !== start?.id);
       return start ? [start, ...middle, start] : middle;
     }
+    function segmentKey(fromCity, toCity) {
+      return `${fromCity.id}::${toCity.id}`;
+    }
+    function autoDistanceLabel(fromCity, toCity) {
+      return `${Math.round(Math.hypot(toCity.x - fromCity.x, toCity.y - fromCity.y) * 2.8)} km`;
+    }
+    function distanceLabelFor(fromCity, toCity) {
+      const custom = distanceLabels[segmentKey(fromCity, toCity)];
+      return custom && custom.trim() ? custom.trim() : autoDistanceLabel(fromCity, toCity);
+    }
+    function cleanupDistanceLabels() {
+      const validKeys = new Set();
+      const points = routeCitiesFull();
+      for (let i = 0; i < points.length - 1; i++) {
+        validKeys.add(segmentKey(points[i], points[i + 1]));
+      }
+      Object.keys(distanceLabels).forEach(key => {
+        if (!validKeys.has(key)) delete distanceLabels[key];
+      });
+    }
     function buildExportData() {
-      return { version:1, savedAt:new Date().toISOString(), cities, routeCityIds };
+      cleanupDistanceLabels();
+      return { version:2, savedAt:new Date().toISOString(), cities, routeCityIds, distanceLabels };
     }
     function saveToBrowser() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(buildExportData()));
@@ -198,10 +228,12 @@
       }));
       if (!windhoek()) cities.unshift({ id: crypto.randomUUID(), name: 'Windhoek', x: 380, y: 300, date: '', protected: true });
       routeCityIds = Array.isArray(data.routeCityIds) ? data.routeCityIds.filter(id => cities.some(c => c.id === id && !c.protected)) : [];
+      distanceLabels = data.distanceLabels && typeof data.distanceLabels === 'object' ? data.distanceLabels : {};
+      cleanupDistanceLabels();
       dragCityId = null;
     }
     function loadFromBrowser() {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(OLD_STORAGE_KEY);
       if (!saved) return;
       applyImportedData(JSON.parse(saved));
     }
@@ -211,10 +243,12 @@
     }
 
     function renderAll() {
+      cleanupDistanceLabels();
       renderRoute();
       renderCities();
       renderSelectors();
       renderCityDateList();
+      renderDistanceList();
       renderRouteList();
     }
 
@@ -264,7 +298,7 @@
       for (let i = 0; i < points.length - 1; i++) {
         const a = points[i], b = points[i + 1];
         const label = makeSvg('text', { class:'distance-label', x:(a.x+b.x)/2 + 6, y:(a.y+b.y)/2 - 6 });
-        label.textContent = `${Math.round(Math.hypot(b.x-a.x, b.y-a.y) * 2.8)} km`;
+        label.textContent = distanceLabelFor(a, b);
         routeLayer.appendChild(label);
       }
     }
@@ -323,6 +357,26 @@
       cityDateList.innerHTML = [...orderedRows, ...unusedRows].join('');
     }
 
+    function renderDistanceList() {
+      const points = routeCitiesFull();
+      if (points.length < 2) {
+        distanceList.innerHTML = '<div class="hint">Add cities to the itinerary to edit distance labels.</div>';
+        return;
+      }
+      const rows = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        const key = segmentKey(a, b);
+        rows.push(`
+          <div class="list-row" style="grid-template-columns:1fr 1fr;">
+            <span>${escapeHtml(a.name)} → ${escapeHtml(b.name)}</span>
+            <input type="text" value="${escapeHtml(distanceLabels[key] || '')}" placeholder="${escapeHtml(autoDistanceLabel(a, b))}" data-distance-key="${escapeHtml(key)}" style="margin:0; padding:4px; font-size:12px;" />
+          </div>
+        `);
+      }
+      distanceList.innerHTML = rows.join('');
+    }
+
     function renderRouteList() {
       const middle = routeCityIds.map(cityById).filter(Boolean);
       const rows = [];
@@ -351,6 +405,7 @@
       city.y = Math.max(20, Math.min(780, p.y));
       renderRoute();
       renderCities();
+      renderDistanceList();
       saveToBrowser();
     });
     svg.addEventListener('pointerup', () => dragCityId = null);
@@ -376,6 +431,7 @@
       if (!confirm(`Delete city "${city.name}" and remove it from the itinerary?`)) return;
       routeCityIds = routeCityIds.filter(id => id !== city.id);
       cities.splice(index, 1);
+      cleanupDistanceLabels();
       saveAndRender();
     });
 
@@ -389,6 +445,7 @@
     clearRouteBtn.addEventListener('click', () => {
       if (!confirm('Clear the itinerary list? Windhoek will remain as start and end.')) return;
       routeCityIds = [];
+      distanceLabels = {};
       saveAndRender();
     });
 
@@ -401,6 +458,22 @@
       renderRoute();
       renderCities();
       saveToBrowser();
+    });
+
+    distanceList.addEventListener('input', event => {
+      const input = event.target.closest('input[data-distance-key]');
+      if (!input) return;
+      const key = input.dataset.distanceKey;
+      distanceLabels[key] = input.value;
+      renderRoute();
+      saveToBrowser();
+    });
+
+    autoDistanceBtn.addEventListener('click', () => {
+      Object.keys(distanceLabels).forEach(key => {
+        if (!distanceLabels[key] || !distanceLabels[key].trim()) delete distanceLabels[key];
+      });
+      saveAndRender();
     });
 
     routeList.addEventListener('click', event => {
@@ -417,6 +490,7 @@
       if (action === 'remove') {
         routeCityIds.splice(index, 1);
       }
+      cleanupDistanceLabels();
       saveAndRender();
     });
 
@@ -424,6 +498,7 @@
     resetSavedBtn.addEventListener('click', () => {
       if (!confirm('Remove saved browser data? This will not change the current map until you refresh or import another file.')) return;
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(OLD_STORAGE_KEY);
       alert('Saved browser data removed.');
     });
     exportBtn.addEventListener('click', () => { exportBox.value = JSON.stringify(buildExportData(), null, 2); });
