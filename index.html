@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Namibia Editable City Itinerary Map</title>
+  <style>
+    :root {
+      --bg: #f6f1e7;
+      --land: #ead9b5;
+      --border: #9b7f55;
+      --city: #1f4e79;
+      --route: #c0392b;
+      --route-soft: #f39c12;
+      --text: #222;
+      --panel: rgba(255,255,255,.93);
+    }
+    body { margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); }
+    .app { display:grid; grid-template-columns:360px 1fr; min-height:100vh; }
+    aside { background:var(--panel); border-right:1px solid #d0c4ad; padding:18px; box-sizing:border-box; overflow-y:auto; }
+    h1 { font-size:20px; margin:0 0 8px; }
+    h2 { font-size:15px; margin:22px 0 8px; border-bottom:1px solid #ddd; padding-bottom:4px; }
+    label { display:block; font-size:13px; margin-top:10px; }
+    input, button, select, textarea { width:100%; box-sizing:border-box; padding:8px; margin-top:4px; border:1px solid #bbb; border-radius:6px; font-size:14px; }
+    button { cursor:pointer; background:#30475e; color:white; border:none; margin-top:10px; }
+    button.secondary { background:#6b705c; }
+    button.danger { background:#9d2b22; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .hint { font-size:12px; color:#555; line-height:1.35; margin-top:8px; }
+    .legend { display:grid; gap:7px; margin-top:10px; font-size:13px; }
+    .legend-row { display:flex; align-items:center; gap:8px; }
+    .swatch { width:15px; height:15px; border-radius:50%; display:inline-block; }
+    .city-swatch { background:var(--city); }
+    .route-swatch { background:var(--route-soft); border:2px solid var(--route); box-sizing:border-box; }
+    main { position:relative; overflow:hidden; }
+    svg { width:100%; height:100vh; display:block; background:linear-gradient(#f9f3e6,#efe2c5); user-select:none; }
+    .country { fill:var(--land); stroke:var(--border); stroke-width:2; }
+    .country-label { fill:rgba(60,40,20,.35); font-weight:bold; font-size:34px; letter-spacing:2px; pointer-events:none; }
+    .city-dot { fill:var(--city); stroke:white; stroke-width:2; cursor:grab; }
+    .city-dot:active { cursor:grabbing; }
+    .city-dot.in-route { fill:var(--route-soft); stroke:var(--route); stroke-width:3; }
+    .city-dot.start-end { fill:#111; stroke:var(--route-soft); stroke-width:4; }
+    .city-label { fill:#102a43; font-size:13px; font-weight:bold; paint-order:stroke; stroke:rgba(255,255,255,.85); stroke-width:4; pointer-events:none; }
+    .city-date-label { fill:#6b3f1d; font-size:12px; font-weight:bold; paint-order:stroke; stroke:rgba(255,255,255,.9); stroke-width:4; pointer-events:none; }
+    .route-label { fill:#5c1f17; font-size:12px; font-weight:bold; paint-order:stroke; stroke:rgba(255,255,255,.9); stroke-width:4; pointer-events:none; }
+    .route-line { fill:none; stroke:var(--route); stroke-width:4; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:8 5; }
+    .distance-label { fill:#4a2c2a; font-size:12px; font-weight:bold; paint-order:stroke; stroke:rgba(255,255,255,.9); stroke-width:4; pointer-events:none; }
+    .toolbar { position:absolute; right:14px; top:14px; background:var(--panel); padding:10px; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,.15); font-size:13px; max-width:300px; }
+    .small-list { font-size:12px; max-height:170px; overflow-y:auto; background:rgba(255,255,255,.7); border:1px solid #ddd; border-radius:6px; padding:6px; margin-top:8px; }
+    .list-row { display:grid; grid-template-columns:1fr auto auto auto; gap:4px; align-items:center; border-bottom:1px solid rgba(0,0,0,.08); padding:4px 0; }
+    .list-row:last-child { border-bottom:none; }
+    .mini-btn { width:auto; padding:3px 6px; margin:0; font-size:11px; border-radius:4px; background:#6b705c; }
+    .mini-btn.danger { background:#9d2b22; }
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    @media (max-width:800px) { .app { grid-template-columns:1fr; } aside { border-right:none; border-bottom:1px solid #d0c4ad; } svg { height:70vh; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <h1>Namibia City Itinerary Map</h1>
+      <p class="hint">Add, move, and remove cities. Then arrange the itinerary list below. The route line starts in Windhoek, follows your ordered list, and returns to Windhoek. You can also enter dates for each city.</p>
+
+      <div class="legend">
+        <div class="legend-row"><span class="swatch city-swatch"></span> City marker: drag to move</div>
+        <div class="legend-row"><span class="swatch route-swatch"></span> City included in route</div>
+      </div>
+
+      <h2>Add a city</h2>
+      <label>City name <input id="cityName" placeholder="e.g., Lüderitz" /></label>
+      <div class="two-col">
+        <label>X: <span id="cityXLabel">400</span><input id="cityX" type="range" min="60" max="940" value="400" /></label>
+        <label>Y: <span id="cityYLabel">250</span><input id="cityY" type="range" min="60" max="740" value="250" /></label>
+      </div>
+      <button id="addCityBtn">Add city</button>
+
+      <h2>Edit itinerary dates</h2>
+      <div id="cityDateList" class="small-list"></div>
+      <p class="hint">Dates are shown in itinerary order: Windhoek, your ordered stops, then Windhoek return. Cities not yet in the itinerary are listed afterward.</p>
+
+      <h2>Remove a city</h2>
+      <label>City to delete <select id="deleteCitySelect"></select></label>
+      <button id="deleteCityBtn" class="danger">Delete selected city</button>
+      <p class="hint">Windhoek is protected because the route must start and end there. Deleting a city also removes it from the itinerary list.</p>
+
+      <h2>Build itinerary route</h2>
+      <label>Add city to itinerary <select id="citySelect"></select></label>
+      <button id="addToRouteBtn">Add selected city to route</button>
+      <button id="clearRouteBtn" class="danger">Clear itinerary, keep Windhoek</button>
+      <p class="hint">The displayed route is always: Windhoek → your list below → Windhoek.</p>
+
+      <h2>Itinerary order</h2>
+      <div id="routeList" class="small-list"></div>
+
+      <h2>Save / backup</h2>
+      <button id="saveNowBtn" class="secondary">Save now to this browser</button>
+      <button id="resetSavedBtn" class="danger">Reset saved browser data</button>
+      <button id="exportBtn" class="secondary">Show backup JSON</button>
+      <textarea id="exportBox" rows="8" placeholder="Backup JSON appears here"></textarea>
+      <button id="downloadJsonBtn" class="secondary">Download backup JSON file</button>
+      <label>Load backup JSON file <input id="importFile" type="file" accept="application/json,.json" /></label>
+      <p class="hint">Auto-save survives closing and reopening this HTML file in the same browser. Use backup JSON to move it to another device or keep a copy.</p>
+    </aside>
+
+    <main>
+      <div class="toolbar">Drag blue city dots to adjust the map. Use ↑ and ↓ in the itinerary list to redraw the route order.</div>
+      <svg id="map" viewBox="0 0 1000 800" aria-label="Editable Namibia itinerary map">
+        <path class="country" d="M250,85 L500,80 L515,350 L455,405 L370,390 L330,520 L250,500 L220,360 L235,240 Z" />
+        <text class="country-label" x="295" y="250">NAMIBIA</text>
+        <path class="country" d="M330,520 L455,405 L600,395 L730,455 L840,560 L800,680 L625,735 L470,710 L345,630 Z" opacity=".35" />
+        <text class="country-label" x="455" y="610" opacity=".6">SOUTH AFRICA</text>
+        <g id="routeLayer"></g>
+        <g id="cityLayer"></g>
+      </svg>
+    </main>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'namibiaCityRouteMap.v1';
+    const WINDHOEK_NAME = 'Windhoek';
+
+    const svg = document.getElementById('map');
+    const cityLayer = document.getElementById('cityLayer');
+    const routeLayer = document.getElementById('routeLayer');
+    const cityName = document.getElementById('cityName');
+    const cityX = document.getElementById('cityX');
+    const cityY = document.getElementById('cityY');
+    const cityXLabel = document.getElementById('cityXLabel');
+    const cityYLabel = document.getElementById('cityYLabel');
+    const addCityBtn = document.getElementById('addCityBtn');
+    const cityDateList = document.getElementById('cityDateList');
+    const deleteCitySelect = document.getElementById('deleteCitySelect');
+    const deleteCityBtn = document.getElementById('deleteCityBtn');
+    const citySelect = document.getElementById('citySelect');
+    const addToRouteBtn = document.getElementById('addToRouteBtn');
+    const clearRouteBtn = document.getElementById('clearRouteBtn');
+    const routeList = document.getElementById('routeList');
+    const saveNowBtn = document.getElementById('saveNowBtn');
+    const resetSavedBtn = document.getElementById('resetSavedBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const exportBox = document.getElementById('exportBox');
+    const downloadJsonBtn = document.getElementById('downloadJsonBtn');
+    const importFile = document.getElementById('importFile');
+
+    let dragCityId = null;
+    let cities = [
+      { id: crypto.randomUUID(), name: 'Windhoek', x: 380, y: 300, date: '', protected: true },
+      { id: crypto.randomUUID(), name: 'Etosha / Okaukuejo', x: 360, y: 165, date: '' },
+      { id: crypto.randomUUID(), name: 'Swakopmund', x: 270, y: 285, date: '' },
+      { id: crypto.randomUUID(), name: 'Sossusvlei', x: 350, y: 420, date: '' },
+      { id: crypto.randomUUID(), name: 'Fish River Canyon', x: 390, y: 520, date: '' }
+    ];
+    let routeCityIds = [];
+
+    function makeSvg(tag, attrs={}) {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v));
+      return el;
+    }
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    }
+    function svgPointFromEvent(event) {
+      const pt = svg.createSVGPoint();
+      pt.x = event.clientX;
+      pt.y = event.clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+    function windhoek() {
+      return cities.find(c => c.protected || c.name.toLowerCase() === WINDHOEK_NAME.toLowerCase());
+    }
+    function cityById(id) {
+      return cities.find(c => c.id === id);
+    }
+    function uniqueNameExists(name) {
+      return cities.some(c => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    }
+    function routeCitiesFull() {
+      const start = windhoek();
+      const middle = routeCityIds.map(cityById).filter(Boolean).filter(c => c.id !== start?.id);
+      return start ? [start, ...middle, start] : middle;
+    }
+    function buildExportData() {
+      return { version:1, savedAt:new Date().toISOString(), cities, routeCityIds };
+    }
+    function saveToBrowser() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildExportData()));
+    }
+    function applyImportedData(data) {
+      if (!data || !Array.isArray(data.cities)) throw new Error('Invalid itinerary backup.');
+      cities = data.cities.map(c => ({
+        id: c.id || crypto.randomUUID(),
+        name: c.name || 'Unnamed city',
+        x: Number(c.x) || 400,
+        y: Number(c.y) || 300,
+        date: c.date || '',
+        protected: Boolean(c.protected || String(c.name).toLowerCase() === 'windhoek')
+      }));
+      if (!windhoek()) cities.unshift({ id: crypto.randomUUID(), name: 'Windhoek', x: 380, y: 300, date: '', protected: true });
+      routeCityIds = Array.isArray(data.routeCityIds) ? data.routeCityIds.filter(id => cities.some(c => c.id === id && !c.protected)) : [];
+      dragCityId = null;
+    }
+    function loadFromBrowser() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return;
+      applyImportedData(JSON.parse(saved));
+    }
+    function saveAndRender() {
+      renderAll();
+      saveToBrowser();
+    }
+
+    function renderAll() {
+      renderRoute();
+      renderCities();
+      renderSelectors();
+      renderCityDateList();
+      renderRouteList();
+    }
+
+    function renderCities() {
+      cityLayer.innerHTML = '';
+      const routeSet = new Set(routeCityIds);
+      const start = windhoek();
+      for (const city of cities) {
+        const isStart = start && city.id === start.id;
+        const inRoute = routeSet.has(city.id);
+        const dot = makeSvg('circle', {
+          class: `city-dot ${inRoute ? 'in-route' : ''} ${isStart ? 'start-end' : ''}`,
+          cx: city.x,
+          cy: city.y,
+          r: isStart ? 9 : 7
+        });
+        dot.addEventListener('pointerdown', event => {
+          dragCityId = city.id;
+          dot.setPointerCapture(event.pointerId);
+        });
+        const label = makeSvg('text', { class:'city-label', x:city.x + 11, y:city.y - 10 });
+        label.textContent = city.name;
+        cityLayer.appendChild(dot);
+        cityLayer.appendChild(label);
+
+        if (city.date) {
+          const dateLabel = makeSvg('text', { class:'city-date-label', x:city.x + 11, y:city.y + 7 });
+          dateLabel.textContent = city.date;
+          cityLayer.appendChild(dateLabel);
+        }
+      }
+    }
+
+    function renderRoute() {
+      routeLayer.innerHTML = '';
+      const points = routeCitiesFull();
+      if (points.length < 2) return;
+      routeLayer.appendChild(makeSvg('polyline', {
+        class: 'route-line',
+        points: points.map(p => `${p.x},${p.y}`).join(' ')
+      }));
+      points.forEach((city, index) => {
+        const label = makeSvg('text', { class:'route-label', x:city.x + 14, y:city.y + 18 });
+        label.textContent = index === points.length - 1 ? `${index + 1}. Return` : `${index + 1}. ${city.name}`;
+        routeLayer.appendChild(label);
+      });
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        const label = makeSvg('text', { class:'distance-label', x:(a.x+b.x)/2 + 6, y:(a.y+b.y)/2 - 6 });
+        label.textContent = `${Math.round(Math.hypot(b.x-a.x, b.y-a.y) * 2.8)} km`;
+        routeLayer.appendChild(label);
+      }
+    }
+
+    function renderSelectors() {
+      citySelect.innerHTML = '';
+      deleteCitySelect.innerHTML = '';
+      cities.forEach((city, index) => {
+        if (!city.protected) {
+          const addOpt = document.createElement('option');
+          addOpt.value = city.id;
+          addOpt.textContent = city.name;
+          citySelect.appendChild(addOpt);
+        }
+        const delOpt = document.createElement('option');
+        delOpt.value = index;
+        delOpt.textContent = city.protected ? `${city.name} (protected)` : city.name;
+        delOpt.disabled = Boolean(city.protected);
+        deleteCitySelect.appendChild(delOpt);
+      });
+    }
+
+    function renderCityDateList() {
+      const start = windhoek();
+      const orderedIds = [];
+      if (start) orderedIds.push(start.id);
+      routeCityIds.forEach(id => {
+        if (id !== start?.id) orderedIds.push(id);
+      });
+      if (start) orderedIds.push(start.id);
+
+      const orderedRows = orderedIds.map((id, index) => {
+        const city = cityById(id);
+        if (!city) return '';
+        const label = index === orderedIds.length - 1 && city.id === start?.id
+          ? `${index + 1}. Windhoek return`
+          : `${index + 1}. ${city.name}`;
+        return `
+          <div class="list-row" style="grid-template-columns:1fr 1fr;">
+            <span>${escapeHtml(label)}</span>
+            <input type="text" value="${escapeHtml(city.date || '')}" placeholder="e.g., May 12" data-city-date-id="${city.id}" style="margin:0; padding:4px; font-size:12px;" />
+          </div>
+        `;
+      });
+
+      const itinerarySet = new Set(orderedIds);
+      const unusedRows = cities
+        .filter(city => !itinerarySet.has(city.id))
+        .map(city => `
+          <div class="list-row" style="grid-template-columns:1fr 1fr; opacity:.8;">
+            <span>Not in route: ${escapeHtml(city.name)}</span>
+            <input type="text" value="${escapeHtml(city.date || '')}" placeholder="e.g., May 12" data-city-date-id="${city.id}" style="margin:0; padding:4px; font-size:12px;" />
+          </div>
+        `);
+
+      cityDateList.innerHTML = [...orderedRows, ...unusedRows].join('');
+    }
+
+    function renderRouteList() {
+      const middle = routeCityIds.map(cityById).filter(Boolean);
+      const rows = [];
+      rows.push(`<div class="list-row"><strong>1. Windhoek</strong><span></span><span></span><span></span></div>`);
+      middle.forEach((city, i) => {
+        const displayNum = i + 2;
+        rows.push(`
+          <div class="list-row">
+            <span>${displayNum}. ${escapeHtml(city.name)}</span>
+            <button class="mini-btn" data-action="up" data-index="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="mini-btn" data-action="down" data-index="${i}" ${i === middle.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="mini-btn danger" data-action="remove" data-index="${i}">×</button>
+          </div>
+        `);
+      });
+      rows.push(`<div class="list-row"><strong>${middle.length + 2}. Windhoek return</strong><span></span><span></span><span></span></div>`);
+      routeList.innerHTML = rows.join('');
+    }
+
+    svg.addEventListener('pointermove', event => {
+      if (!dragCityId) return;
+      const city = cityById(dragCityId);
+      if (!city) return;
+      const p = svgPointFromEvent(event);
+      city.x = Math.max(20, Math.min(980, p.x));
+      city.y = Math.max(20, Math.min(780, p.y));
+      renderRoute();
+      renderCities();
+      saveToBrowser();
+    });
+    svg.addEventListener('pointerup', () => dragCityId = null);
+    svg.addEventListener('pointerleave', () => dragCityId = null);
+
+    cityX.addEventListener('input', () => cityXLabel.textContent = cityX.value);
+    cityY.addEventListener('input', () => cityYLabel.textContent = cityY.value);
+
+    addCityBtn.addEventListener('click', () => {
+      const name = cityName.value.trim();
+      if (!name) return alert('Please enter a city name.');
+      if (uniqueNameExists(name)) return alert('That city name is already on the map.');
+      cities.push({ id:crypto.randomUUID(), name, x:Number(cityX.value), y:Number(cityY.value), date:'' });
+      cityName.value = '';
+      saveAndRender();
+    });
+
+    deleteCityBtn.addEventListener('click', () => {
+      const index = Number(deleteCitySelect.value);
+      const city = cities[index];
+      if (!city) return;
+      if (city.protected) return alert('Windhoek cannot be deleted because the route starts and ends there.');
+      if (!confirm(`Delete city "${city.name}" and remove it from the itinerary?`)) return;
+      routeCityIds = routeCityIds.filter(id => id !== city.id);
+      cities.splice(index, 1);
+      saveAndRender();
+    });
+
+    addToRouteBtn.addEventListener('click', () => {
+      const id = citySelect.value;
+      if (!id) return alert('Please choose a city to add.');
+      routeCityIds.push(id);
+      saveAndRender();
+    });
+
+    clearRouteBtn.addEventListener('click', () => {
+      if (!confirm('Clear the itinerary list? Windhoek will remain as start and end.')) return;
+      routeCityIds = [];
+      saveAndRender();
+    });
+
+    cityDateList.addEventListener('input', event => {
+      const input = event.target.closest('input[data-city-date-id]');
+      if (!input) return;
+      const city = cityById(input.dataset.cityDateId);
+      if (!city) return;
+      city.date = input.value;
+      renderRoute();
+      renderCities();
+      saveToBrowser();
+    });
+
+    routeList.addEventListener('click', event => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const index = Number(button.dataset.index);
+      const action = button.dataset.action;
+      if (action === 'up' && index > 0) {
+        [routeCityIds[index - 1], routeCityIds[index]] = [routeCityIds[index], routeCityIds[index - 1]];
+      }
+      if (action === 'down' && index < routeCityIds.length - 1) {
+        [routeCityIds[index + 1], routeCityIds[index]] = [routeCityIds[index], routeCityIds[index + 1]];
+      }
+      if (action === 'remove') {
+        routeCityIds.splice(index, 1);
+      }
+      saveAndRender();
+    });
+
+    saveNowBtn.addEventListener('click', () => { saveToBrowser(); alert('Saved to this browser.'); });
+    resetSavedBtn.addEventListener('click', () => {
+      if (!confirm('Remove saved browser data? This will not change the current map until you refresh or import another file.')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      alert('Saved browser data removed.');
+    });
+    exportBtn.addEventListener('click', () => { exportBox.value = JSON.stringify(buildExportData(), null, 2); });
+    downloadJsonBtn.addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(buildExportData(), null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'namibia-city-itinerary-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+    importFile.addEventListener('change', event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          applyImportedData(JSON.parse(reader.result));
+          saveAndRender();
+          alert('Backup loaded and saved to this browser.');
+        } catch (error) {
+          console.error(error);
+          alert('Could not load that JSON file.');
+        }
+      };
+      reader.readAsText(file);
+      importFile.value = '';
+    });
+
+    try { loadFromBrowser(); } catch (error) { console.warn('Could not load saved map:', error); }
+    renderAll();
+  </script>
+</body>
+</html>
